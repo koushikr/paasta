@@ -7,14 +7,6 @@ from paasta_tools import iptables
 from paasta_tools.utils import get_docker_client
 
 
-def list_docker_nat_rules():
-    chain_name = 'DOCKER'
-    table = iptc.Table(iptc.Table.NAT)
-    chain = iptc.Chain(table, chain_name)
-    for rule in chain.rules:
-        yield iptables.Rule.from_iptc(rule)
-
-
 def get_container_from_dport(dport, docker_client):
     for container in docker_client.containers():
         try:
@@ -37,11 +29,19 @@ def target_rule_to_dport(rule):
 
 
 def kill_containers_with_duplicate_iptables_rules(docker_client):
+    chain_name = 'DOCKER'
+    table = iptc.Table(iptc.Table.NAT)
+    chain = iptc.Chain(table, chain_name)
+
     targets_seen = {}
-    for rule in list_docker_nat_rules():
+    raw_rules = {}
+
+    for iptables_rule in chain.rules:
+        rule = iptables.Rule.from_iptc(iptables_rule)
         target = rule.target_parameters
         if target not in targets_seen:
             targets_seen[target] = rule
+            raw_rules[target] = iptables_rule
         else:
             print("This is the second time we've seen a rule with the same target_parameters!")
             print(rule)
@@ -62,6 +62,9 @@ def kill_containers_with_duplicate_iptables_rules(docker_client):
                 print(container2)
                 print("Not sure which to kill, picking the first one")
                 docker_client.kill(container1["Id"])
+            print("Deleting the iptables rules")
+            chain.delete_rule(iptables_rule)
+            chain.delete_rule(raw_rules[target])
 
 
 def main():
